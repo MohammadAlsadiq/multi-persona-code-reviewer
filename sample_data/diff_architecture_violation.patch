@@ -1,0 +1,19 @@
+--- a/frontend/components/UserProfile.tsx
++++ b/frontend/components/UserProfile.tsx
+@@ -4,10 +4,18 @@
+ import React, { useEffect, useState } from "react";
+-import { fetchUserProfile } from "../services/apiClient";
++import { PostgresClient } from "../../backend/database/rawConnection";
+
+ export const UserProfile = ({ userId }: { userId: string }) => {
+   const [data, setData] = useState<any>(null);
+
+   useEffect(() => {
+-    fetchUserProfile(userId).then(setData);
++    // Layer violation: UI component opening direct DB connection
++    const pg = new PostgresClient("postgres://admin:pass@localhost:5432/prod");
++    pg.query(`SELECT * FROM internal_user_table WHERE uid = '${userId}'`).then((res) => {
++      // Breaking API contract: renamed 'fullName' to 'usr_nm' without versioning
++      setData({ usr_nm: res.rows[0].name, raw_balance_cents: res.rows[0].balance });
++    });
+   }, [userId]);
