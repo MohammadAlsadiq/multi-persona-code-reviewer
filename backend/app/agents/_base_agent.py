@@ -80,10 +80,15 @@ async def run_agent(prompt_file: str, diff_input: DiffInput) -> List[Finding]:
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
 
+    # --- Resolve target completions endpoint ---------------------------------
+    endpoint_url = base_url.rstrip("/")
+    if not endpoint_url.endswith("/chat/completions"):
+        endpoint_url = f"{endpoint_url}/chat/completions"
+
     # --- Call the LLM --------------------------------------------------------
     try:
         async with httpx.AsyncClient(timeout=60.0) as client:
-            response = await client.post(base_url, json=payload, headers=headers)
+            response = await client.post(endpoint_url, json=payload, headers=headers)
             response.raise_for_status()
     except httpx.TimeoutException:
         logger.warning("LLM request timed out for prompt '%s'.", prompt_file)
@@ -127,3 +132,4 @@ async def run_agent(prompt_file: str, diff_input: DiffInput) -> List[Finding]:
             logger.warning("Skipping malformed finding %d in '%s': %s", idx, prompt_file, exc)
 
     return findings
+    
