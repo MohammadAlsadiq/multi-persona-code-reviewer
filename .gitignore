@@ -9,6 +9,8 @@ node_modules/
 .next/
 out/
 npm-debug.log*
+next-env.d.ts
+*.tsbuildinfo
 
 # ── Environment / secrets ───────────────────────────────
 .env
