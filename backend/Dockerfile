@@ -1,0 +1,38 @@
+# ---------------------------------------------------------------------------
+# Stage 1: build — install Python dependencies into a clean prefix
+# ---------------------------------------------------------------------------
+FROM python:3.12-slim AS builder
+
+WORKDIR /build
+
+# Install dependencies into /install so we can copy them cleanly
+COPY requirements.txt .
+RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
+
+
+# ---------------------------------------------------------------------------
+# Stage 2: runtime — minimal image with only what we need
+# ---------------------------------------------------------------------------
+FROM python:3.12-slim
+
+# Non-root user for security
+RUN addgroup --system appgroup && adduser --system --ingroup appgroup appuser
+
+WORKDIR /app
+
+# Copy installed packages from builder
+COPY --from=builder /install /usr/local
+
+# Copy application source
+COPY app/ ./app/
+
+# Copy sample data used by /api/samples (mounted one level up at runtime, but
+# embed it so the image is self-contained)
+COPY ../sample_data/ /sample_data/
+
+# Switch to non-root
+USER appuser
+
+EXPOSE 8000
+
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

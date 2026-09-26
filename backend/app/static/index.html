@@ -1,0 +1,795 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Multi-Persona Code Reviewer</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    /* ── Scrollbars ──────────────────────────────────────── */
+    textarea::-webkit-scrollbar,
+    .chat-thread::-webkit-scrollbar { width: 5px; }
+    textarea::-webkit-scrollbar-thumb,
+    .chat-thread::-webkit-scrollbar-thumb { background: #475569; border-radius: 3px; }
+    pre::-webkit-scrollbar { height: 5px; }
+    pre::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+
+    /* ── Diff syntax ─────────────────────────────────────── */
+    .diff-add  { color: #4ade80; }
+    .diff-del  { color: #f87171; }
+    .diff-meta { color: #94a3b8; }
+
+    /* ── Animations ──────────────────────────────────────── */
+    @keyframes spin  { to { transform: rotate(360deg); } }
+    @keyframes pulse { 0%,100% { opacity:1 } 50% { opacity:0.4 } }
+    @keyframes bounce-dot {
+      0%,80%,100% { transform: translateY(0); }
+      40%          { transform: translateY(-5px); }
+    }
+    .spinner        { animation: spin 0.8s linear infinite; }
+    .pulse-anim     { animation: pulse 1.5s ease-in-out infinite; }
+    .bounce-dot     { display:inline-block; animation: bounce-dot 1s ease infinite; }
+    .bounce-dot:nth-child(2) { animation-delay: .15s; }
+    .bounce-dot:nth-child(3) { animation-delay: .30s; }
+
+    /* ── Tab active ──────────────────────────────────────── */
+    .tab-btn.active { background-color:#3b82f6; color:#fff; }
+
+    /* ── Robot avatar glow ───────────────────────────────── */
+    .robot-glow-red    { filter: drop-shadow(0 0 6px #ef444460); }
+    .robot-glow-amber  { filter: drop-shadow(0 0 6px #f59e0b60); }
+    .robot-glow-purple { filter: drop-shadow(0 0 6px #a855f760); }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen font-sans antialiased">
+
+  <!-- ── Header ─────────────────────────────────────────────────── -->
+  <header class="border-b border-slate-800 bg-slate-900 px-6 py-4 flex items-center gap-3">
+    <svg class="w-7 h-7 text-blue-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
+      <path stroke-linecap="round" stroke-linejoin="round"
+            d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944
+               a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0
+               5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03
+               9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+    </svg>
+    <div>
+      <h1 class="text-lg font-semibold leading-tight">Multi-Persona Code Reviewer</h1>
+      <p class="text-xs text-slate-400">SecBot 🔒 · PerfBot ⚡ · ArchBot 🏛️</p>
+    </div>
+    <span id="health-badge" class="ml-auto text-xs px-2 py-0.5 rounded-full bg-slate-700 text-slate-400">checking…</span>
+  </header>
+
+  <main class="max-w-5xl mx-auto px-4 py-8 space-y-8">
+
+    <!-- ── Sample Loaders ─────────────────────────────────────────── -->
+    <section class="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-3">
+      <h2 class="text-sm font-semibold text-slate-300 uppercase tracking-wider">Load Sample Diff</h2>
+      <div class="flex flex-wrap gap-2">
+        <button data-sample="diff_security_flaw.patch"
+                class="sample-btn px-4 py-2 text-sm rounded-lg bg-red-950 hover:bg-red-900 border border-red-800 text-red-300 transition-colors">
+          🔒 Security Flaw
+        </button>
+        <button data-sample="diff_performance_issue.patch"
+                class="sample-btn px-4 py-2 text-sm rounded-lg bg-amber-950 hover:bg-amber-900 border border-amber-800 text-amber-300 transition-colors">
+          ⚡ Performance Issue
+        </button>
+        <button data-sample="diff_architecture_violation.patch"
+                class="sample-btn px-4 py-2 text-sm rounded-lg bg-violet-950 hover:bg-violet-900 border border-violet-800 text-violet-300 transition-colors">
+          🏛 Architecture Violation
+        </button>
+      </div>
+      <p id="sample-error" class="hidden text-xs text-red-400"></p>
+    </section>
+
+    <!-- ── Diff Input ─────────────────────────────────────────────── -->
+    <section class="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-3">
+      <h2 class="text-sm font-semibold text-slate-300 uppercase tracking-wider">Git Diff Input</h2>
+      <textarea id="diff-input" rows="12"
+                placeholder="Paste your raw git diff / unified diff here…"
+                class="w-full rounded-lg bg-slate-950 border border-slate-700 text-slate-100
+                       font-mono text-xs leading-relaxed p-3 resize-y
+                       focus:outline-none focus:ring-2 focus:ring-blue-600
+                       placeholder-slate-600"></textarea>
+      <details class="group">
+        <summary class="cursor-pointer select-none text-xs text-slate-400 hover:text-slate-200 w-fit">
+          ▸ Override LLM credentials (optional)
+        </summary>
+        <div class="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div>
+            <label class="block text-xs text-slate-400 mb-1">API Key</label>
+            <input id="override-api-key" type="password" placeholder="sk-…"
+                   class="w-full rounded bg-slate-950 border border-slate-700 text-slate-100 text-xs px-3 py-2 focus:outline-none focus:ring-1 focus:ring-blue-600" />
+          </div>
+          <div>
+            <label class="block text-xs text-slate-400 mb-1">Base URL</label>
+            <input id="override-base-url" type="text" placeholder="https://api.openai.com/v1"
+                   class="w-full rounded bg-slate-950 border border-slate-700 text-slate-100 text-xs px-3 py-2 focus:outline-none focus:ring-1 focus:ring-blue-600" />
+          </div>
+          <div>
+            <label class="block text-xs text-slate-400 mb-1">Model</label>
+            <input id="override-model" type="text" placeholder="gpt-4o"
+                   class="w-full rounded bg-slate-950 border border-slate-700 text-slate-100 text-xs px-3 py-2 focus:outline-none focus:ring-1 focus:ring-blue-600" />
+          </div>
+        </div>
+      </details>
+      <div class="flex items-center gap-3 pt-1">
+        <button id="run-btn"
+                class="px-6 py-2.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-sm font-semibold
+                       transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
+          <svg id="btn-icon" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/>
+            <path stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+          </svg>
+          Run Review
+        </button>
+        <span id="status-msg" class="text-xs text-slate-400"></span>
+      </div>
+      <p id="review-error" class="hidden text-xs text-red-400"></p>
+    </section>
+
+    <!-- ── Results Dashboard ──────────────────────────────────────── -->
+    <section id="results-section" class="hidden space-y-8">
+
+      <!-- Score bar -->
+      <div class="bg-slate-900 border border-slate-800 rounded-xl p-5 flex flex-col sm:flex-row sm:items-center gap-4">
+        <div class="flex-1">
+          <p class="text-xs text-slate-400 mb-1">Health Score</p>
+          <div class="flex items-end gap-3">
+            <span id="health-score" class="text-5xl font-bold tabular-nums">—</span>
+            <span class="text-slate-500 text-sm mb-1">/ 100</span>
+          </div>
+          <div class="mt-2 h-2 rounded-full bg-slate-800 overflow-hidden">
+            <div id="score-bar" class="h-full rounded-full transition-all duration-500 bg-green-500" style="width:0%"></div>
+          </div>
+        </div>
+        <div class="text-right sm:text-left">
+          <p class="text-xs text-slate-400 mb-1">Total Issues</p>
+          <p id="total-issues" class="text-4xl font-bold tabular-nums text-slate-100">—</p>
+        </div>
+      </div>
+
+      <!-- ── Robot Command Deck ────────────────────────────────────── -->
+      <div>
+        <h2 class="text-sm font-semibold text-slate-300 uppercase tracking-wider mb-4">🤖 Robot Command Deck</h2>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4" id="robot-deck">
+
+          <!-- SecBot -->
+          <div class="flex flex-col rounded-2xl border border-red-800/50 bg-slate-900/70 overflow-hidden">
+            <div class="bg-red-950/50 px-4 pt-5 pb-4 flex flex-col items-center gap-2">
+              <svg viewBox="0 0 80 80" fill="none" class="w-20 h-20 robot-glow-red" aria-hidden="true">
+                <rect x="18" y="20" width="44" height="36" rx="8" fill="#1e1e2e" stroke="#ef4444" stroke-width="2"/>
+                <line x1="40" y1="20" x2="40" y2="10" stroke="#ef4444" stroke-width="2" stroke-linecap="round"/>
+                <circle cx="40" cy="8" r="3" fill="#ef4444"/>
+                <rect x="24" y="30" width="12" height="9" rx="3" fill="#7f1d1d" stroke="#ef4444" stroke-width="1.5"/>
+                <rect x="44" y="30" width="12" height="9" rx="3" fill="#7f1d1d" stroke="#ef4444" stroke-width="1.5"/>
+                <path d="M28 32 L30 31 L32 32 L32 35 L30 36.5 L28 35 Z" fill="#ef4444" opacity="0.8"/>
+                <rect x="28" y="44" width="24" height="5" rx="2.5" fill="#7f1d1d" stroke="#ef4444" stroke-width="1.5"/>
+                <rect x="28" y="56" width="24" height="12" rx="4" fill="#1e1e2e" stroke="#ef4444" stroke-width="1.5"/>
+                <path d="M37 59 L40 57.5 L43 59 L43 63 L40 64.5 L37 63 Z" fill="#ef4444" opacity="0.6"/>
+              </svg>
+              <p class="text-red-400 font-bold text-sm">🔒 SecBot</p>
+              <p class="text-slate-500 text-xs">Vulnerability &amp; Exploit Analysis</p>
+              <span id="secbot-status" class="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-slate-800 text-slate-400">—</span>
+            </div>
+            <div id="secbot-findings" class="flex-1 px-3 py-3 space-y-2 overflow-y-auto max-h-52"></div>
+            <div class="px-3 pb-4">
+              <div class="border-t border-white/10 pt-3">
+                <button onclick="toggleChat('sec')" class="w-full text-left text-xs font-semibold text-red-400 flex items-center gap-1.5 mb-2">
+                  <span id="sec-chat-arrow">▸</span> Chat with SecBot
+                </button>
+                <div id="sec-chat-panel" class="hidden space-y-2">
+                  <div class="flex flex-wrap gap-1.5">
+                    <button onclick="sendQuickChip('sec','Why is this critical?')" class="chip-btn text-red-300 bg-red-900/50 border-red-800">Why is this critical?</button>
+                    <button onclick="sendQuickChip('sec','How can this be exploited?')" class="chip-btn text-red-300 bg-red-900/50 border-red-800">How can this be exploited?</button>
+                    <button onclick="sendQuickChip('sec','Show me a secure fix')" class="chip-btn text-red-300 bg-red-900/50 border-red-800">Show me a secure fix</button>
+                  </div>
+                  <div id="sec-thread" class="chat-thread max-h-44 overflow-y-auto space-y-2 rounded-lg bg-black/30 p-2 hidden"></div>
+                  <div class="flex gap-1.5">
+                    <input id="sec-input" type="text" placeholder="Ask SecBot…"
+                           class="flex-1 bg-black/30 border border-white/10 rounded-lg px-3 py-1.5 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:ring-1 focus:ring-white/20"
+                           onkeydown="if(event.key==='Enter')sendChat('sec')" />
+                    <button onclick="sendChat('sec')" class="text-xs px-3 py-1.5 rounded-lg border bg-red-900/50 hover:bg-red-800/70 text-red-300 border-red-800 transition">↵</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- PerfBot -->
+          <div class="flex flex-col rounded-2xl border border-amber-800/50 bg-slate-900/70 overflow-hidden">
+            <div class="bg-amber-950/50 px-4 pt-5 pb-4 flex flex-col items-center gap-2">
+              <svg viewBox="0 0 80 80" fill="none" class="w-20 h-20 robot-glow-amber" aria-hidden="true">
+                <path d="M16 24 Q16 18 22 18 L58 18 Q64 18 64 24 L64 54 Q64 60 58 60 L22 60 Q16 60 16 54 Z" fill="#1e1e2e" stroke="#f59e0b" stroke-width="2"/>
+                <line x1="30" y1="18" x2="26" y2="9" stroke="#f59e0b" stroke-width="2" stroke-linecap="round"/>
+                <line x1="50" y1="18" x2="54" y2="9" stroke="#f59e0b" stroke-width="2" stroke-linecap="round"/>
+                <circle cx="26" cy="7" r="3" fill="#f59e0b"/>
+                <circle cx="54" cy="7" r="3" fill="#f59e0b"/>
+                <ellipse cx="30" cy="34" rx="7" ry="6" fill="#78350f" stroke="#f59e0b" stroke-width="1.5"/>
+                <ellipse cx="50" cy="34" rx="7" ry="6" fill="#78350f" stroke="#f59e0b" stroke-width="1.5"/>
+                <path d="M28 31 L32 34 L30 34 L33 37" stroke="#f59e0b" stroke-width="1.5" stroke-linecap="round"/>
+                <path d="M48 31 L52 34 L50 34 L53 37" stroke="#f59e0b" stroke-width="1.5" stroke-linecap="round"/>
+                <line x1="27" y1="48" x2="53" y2="48" stroke="#f59e0b" stroke-width="2" stroke-linecap="round"/>
+                <line x1="30" y1="52" x2="50" y2="52" stroke="#f59e0b" stroke-width="1.5" stroke-linecap="round" opacity="0.5"/>
+              </svg>
+              <p class="text-amber-400 font-bold text-sm">⚡ PerfBot</p>
+              <p class="text-slate-500 text-xs">Throughput &amp; Complexity Analysis</p>
+              <span id="perfbot-status" class="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-slate-800 text-slate-400">—</span>
+            </div>
+            <div id="perfbot-findings" class="flex-1 px-3 py-3 space-y-2 overflow-y-auto max-h-52"></div>
+            <div class="px-3 pb-4">
+              <div class="border-t border-white/10 pt-3">
+                <button onclick="toggleChat('perf')" class="w-full text-left text-xs font-semibold text-amber-400 flex items-center gap-1.5 mb-2">
+                  <span id="perf-chat-arrow">▸</span> Chat with PerfBot
+                </button>
+                <div id="perf-chat-panel" class="hidden space-y-2">
+                  <div class="flex flex-wrap gap-1.5">
+                    <button onclick="sendQuickChip('perf','What is the complexity?')" class="chip-btn text-amber-300 bg-amber-900/50 border-amber-800">What is the complexity?</button>
+                    <button onclick="sendQuickChip('perf','Show me a faster alternative')" class="chip-btn text-amber-300 bg-amber-900/50 border-amber-800">Show me a faster alternative</button>
+                    <button onclick="sendQuickChip('perf','How bad is this at scale?')" class="chip-btn text-amber-300 bg-amber-900/50 border-amber-800">How bad is this at scale?</button>
+                  </div>
+                  <div id="perf-thread" class="chat-thread max-h-44 overflow-y-auto space-y-2 rounded-lg bg-black/30 p-2 hidden"></div>
+                  <div class="flex gap-1.5">
+                    <input id="perf-input" type="text" placeholder="Ask PerfBot…"
+                           class="flex-1 bg-black/30 border border-white/10 rounded-lg px-3 py-1.5 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:ring-1 focus:ring-white/20"
+                           onkeydown="if(event.key==='Enter')sendChat('perf')" />
+                    <button onclick="sendChat('perf')" class="text-xs px-3 py-1.5 rounded-lg border bg-amber-900/50 hover:bg-amber-800/70 text-amber-300 border-amber-800 transition">↵</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- ArchBot -->
+          <div class="flex flex-col rounded-2xl border border-purple-800/50 bg-slate-900/70 overflow-hidden">
+            <div class="bg-purple-950/50 px-4 pt-5 pb-4 flex flex-col items-center gap-2">
+              <svg viewBox="0 0 80 80" fill="none" class="w-20 h-20 robot-glow-purple" aria-hidden="true">
+                <polygon points="40,12 60,23 60,57 40,68 20,57 20,23" fill="#1e1e2e" stroke="#a855f7" stroke-width="2"/>
+                <rect x="24" y="31" width="13" height="10" rx="2" fill="#3b0764" stroke="#a855f7" stroke-width="1.5"/>
+                <rect x="43" y="31" width="13" height="10" rx="2" fill="#3b0764" stroke="#a855f7" stroke-width="1.5"/>
+                <line x1="30.5" y1="31" x2="30.5" y2="41" stroke="#a855f7" stroke-width="0.8" opacity="0.6"/>
+                <line x1="24" y1="36" x2="37" y2="36" stroke="#a855f7" stroke-width="0.8" opacity="0.6"/>
+                <line x1="49.5" y1="31" x2="49.5" y2="41" stroke="#a855f7" stroke-width="0.8" opacity="0.6"/>
+                <line x1="43" y1="36" x2="56" y2="36" stroke="#a855f7" stroke-width="0.8" opacity="0.6"/>
+                <path d="M28 50 L40 46 L52 50" stroke="#a855f7" stroke-width="2" stroke-linecap="round" fill="none"/>
+                <circle cx="40" cy="46" r="2" fill="#a855f7"/>
+              </svg>
+              <p class="text-purple-400 font-bold text-sm">🏛️ ArchBot</p>
+              <p class="text-slate-500 text-xs">Design &amp; Maintainability Analysis</p>
+              <span id="archbot-status" class="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-slate-800 text-slate-400">—</span>
+            </div>
+            <div id="archbot-findings" class="flex-1 px-3 py-3 space-y-2 overflow-y-auto max-h-52"></div>
+            <div class="px-3 pb-4">
+              <div class="border-t border-white/10 pt-3">
+                <button onclick="toggleChat('arch')" class="w-full text-left text-xs font-semibold text-purple-400 flex items-center gap-1.5 mb-2">
+                  <span id="arch-chat-arrow">▸</span> Chat with ArchBot
+                </button>
+                <div id="arch-chat-panel" class="hidden space-y-2">
+                  <div class="flex flex-wrap gap-1.5">
+                    <button onclick="sendQuickChip('arch','Which SOLID principle is violated?')" class="chip-btn text-purple-300 bg-purple-900/50 border-purple-800">Which SOLID principle?</button>
+                    <button onclick="sendQuickChip('arch','Show me a refactored design')" class="chip-btn text-purple-300 bg-purple-900/50 border-purple-800">Show a refactored design</button>
+                    <button onclick="sendQuickChip('arch','How does this affect maintainability?')" class="chip-btn text-purple-300 bg-purple-900/50 border-purple-800">Maintainability impact?</button>
+                  </div>
+                  <div id="arch-thread" class="chat-thread max-h-44 overflow-y-auto space-y-2 rounded-lg bg-black/30 p-2 hidden"></div>
+                  <div class="flex gap-1.5">
+                    <input id="arch-input" type="text" placeholder="Ask ArchBot…"
+                           class="flex-1 bg-black/30 border border-white/10 rounded-lg px-3 py-1.5 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:ring-1 focus:ring-white/20"
+                           onkeydown="if(event.key==='Enter')sendChat('arch')" />
+                    <button onclick="sendChat('arch')" class="text-xs px-3 py-1.5 rounded-lg border bg-purple-900/50 hover:bg-purple-800/70 text-purple-300 border-purple-800 transition">↵</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+        </div><!-- /robot-deck -->
+      </div>
+
+      <!-- ── Council Console ───────────────────────────────────────── -->
+      <div>
+        <div class="flex items-end gap-3 mb-3">
+          <div>
+            <h2 class="text-sm font-semibold text-slate-300 uppercase tracking-wider">🛡️ Multi-Agent Review Council</h2>
+            <p class="text-xs text-slate-500 mt-0.5">Ask all three robots simultaneously — they reply concurrently.</p>
+          </div>
+          <button onclick="clearCouncil()" class="ml-auto text-xs text-slate-600 hover:text-slate-400 transition">Clear</button>
+        </div>
+        <!-- Terminal window -->
+        <div class="rounded-2xl border border-slate-700 bg-slate-950 overflow-hidden shadow-xl">
+          <!-- Title bar -->
+          <div class="flex items-center gap-2 px-4 py-2 bg-slate-800/80 border-b border-slate-700">
+            <span class="h-3 w-3 rounded-full bg-red-500/70"></span>
+            <span class="h-3 w-3 rounded-full bg-amber-500/70"></span>
+            <span class="h-3 w-3 rounded-full bg-green-500/70"></span>
+            <span class="ml-2 text-xs text-slate-400 font-mono">council-chat — SecBot · PerfBot · ArchBot</span>
+          </div>
+          <!-- Thread -->
+          <div id="council-thread" class="chat-thread min-h-[160px] max-h-[460px] overflow-y-auto p-4 space-y-5">
+            <div id="council-placeholder" class="flex flex-col items-center justify-center py-8 gap-2 text-center">
+              <p class="text-2xl">🤖🤖🤖</p>
+              <p class="text-sm text-slate-400">All three robots are standing by. Ask them anything about the diff.</p>
+            </div>
+          </div>
+          <!-- Input bar -->
+          <div class="border-t border-slate-800 px-4 py-3 flex gap-2">
+            <span class="text-green-400 font-mono text-sm mt-1.5 select-none">›</span>
+            <input id="council-input" type="text" placeholder="Ask all three robots a question…"
+                   class="flex-1 bg-transparent text-sm text-slate-200 placeholder-slate-600 focus:outline-none font-mono"
+                   onkeydown="if(event.key==='Enter')sendCouncil()" />
+            <button onclick="sendCouncil()"
+                    class="px-4 py-1.5 rounded-lg bg-blue-700 hover:bg-blue-600 text-white text-xs font-semibold transition disabled:opacity-30"
+                    id="council-btn">
+              Ask →
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Filter tabs -->
+      <div>
+        <h2 class="text-sm font-semibold text-slate-300 uppercase tracking-wider mb-3">All Findings</h2>
+        <div class="flex flex-wrap gap-2 mb-4" id="filter-tabs">
+          <button class="tab-btn active px-4 py-1.5 text-sm rounded-full border border-slate-700 transition-colors" data-filter="all">All</button>
+          <button class="tab-btn px-4 py-1.5 text-sm rounded-full border border-red-900 text-red-300 hover:bg-red-950 transition-colors" data-filter="security">🔒 Security</button>
+          <button class="tab-btn px-4 py-1.5 text-sm rounded-full border border-amber-900 text-amber-300 hover:bg-amber-950 transition-colors" data-filter="performance">⚡ Performance</button>
+          <button class="tab-btn px-4 py-1.5 text-sm rounded-full border border-violet-900 text-violet-300 hover:bg-violet-950 transition-colors" data-filter="architecture">🏛 Architecture</button>
+        </div>
+        <div id="findings-container" class="space-y-4"></div>
+        <p id="no-findings" class="hidden text-center text-slate-500 text-sm py-8">No findings match this filter.</p>
+      </div>
+
+    </section><!-- /results-section -->
+  </main>
+
+  <!-- ── Finding card template ──────────────────────────────────────── -->
+  <template id="finding-tpl">
+    <article class="finding-card bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
+      <div class="px-5 py-4 flex flex-wrap items-start gap-3">
+        <span class="severity-badge text-xs font-bold px-2.5 py-0.5 rounded-full"></span>
+        <span class="category-badge text-xs px-2 py-0.5 rounded-full bg-slate-800 text-slate-300"></span>
+        <span class="file-label font-mono text-xs text-slate-400 break-all"></span>
+        <span class="line-label text-xs text-slate-500 ml-auto">line <strong class="line-num text-slate-300"></strong></span>
+      </div>
+      <div class="px-5 pb-2">
+        <p class="issue-text font-medium text-slate-100 text-sm leading-snug"></p>
+      </div>
+      <div class="px-5 pb-4">
+        <p class="text-xs text-slate-400 uppercase tracking-wide mb-1">Suggestion</p>
+        <p class="suggestion-text text-sm text-slate-300 leading-relaxed"></p>
+      </div>
+      <details class="border-t border-slate-800">
+        <summary class="px-5 py-3 cursor-pointer select-none text-xs text-slate-500 hover:text-slate-300 transition-colors">Show suggested patch</summary>
+        <pre class="patch-block overflow-x-auto text-xs font-mono leading-relaxed bg-slate-950 px-5 py-4 m-0"></pre>
+      </details>
+    </article>
+  </template>
+
+  <style>
+    .chip-btn { font-size:10px; padding:2px 8px; border-radius:9999px; border-width:1px; cursor:pointer; transition:background-color .15s; }
+  </style>
+
+  <script>
+    // ── State ───────────────────────────────────────────────────────
+    let samplesCache = null;
+    let currentReport = null;
+    let activeFilter = 'all';
+
+    // Per-bot chat state: { history: [{role,content}], findings: [] }
+    const botState = {
+      sec:  { persona:'SECURITY',     history:[], findings:[] },
+      perf: { persona:'PERFORMANCE',  history:[], findings:[] },
+      arch: { persona:'ARCHITECTURE', history:[], findings:[] },
+    };
+
+    // ── Credential helpers ──────────────────────────────────────────
+    function getCredOverrides() {
+      const o = {};
+      const k = document.getElementById('override-api-key').value.trim();
+      const u = document.getElementById('override-base-url').value.trim();
+      const m = document.getElementById('override-model').value.trim();
+      if (k) o.api_key  = k;
+      if (u) o.base_url = u;
+      if (m) o.model    = m;
+      return o;
+    }
+
+    // ── Health check ────────────────────────────────────────────────
+    async function checkHealth() {
+      const badge = document.getElementById('health-badge');
+      try {
+        const r = await fetch('/api/health');
+        badge.textContent = r.ok ? '● online' : '● offline';
+        badge.className = 'ml-auto text-xs px-2 py-0.5 rounded-full ' +
+          (r.ok ? 'bg-green-900 text-green-400' : 'bg-red-900 text-red-400');
+      } catch {
+        badge.textContent = '● offline';
+        badge.className = 'ml-auto text-xs px-2 py-0.5 rounded-full bg-red-900 text-red-400';
+      }
+    }
+
+    // ── Sample loading ───────────────────────────────────────────────
+    async function loadSamples() {
+      if (samplesCache) return samplesCache;
+      const errEl = document.getElementById('sample-error');
+      try {
+        const r = await fetch('/api/samples');
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        samplesCache = await r.json();
+        errEl.classList.add('hidden');
+        return samplesCache;
+      } catch (e) {
+        errEl.textContent = `Could not load samples: ${e.message}`;
+        errEl.classList.remove('hidden');
+        return null;
+      }
+    }
+    document.querySelectorAll('.sample-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const data = await loadSamples();
+        if (data && data[btn.dataset.sample]) {
+          document.getElementById('diff-input').value = data[btn.dataset.sample];
+          btn.classList.add('ring-2','ring-offset-1','ring-offset-slate-900','ring-blue-500');
+          setTimeout(() => btn.classList.remove('ring-2','ring-offset-1','ring-offset-slate-900','ring-blue-500'), 900);
+        }
+      });
+    });
+
+    // ── Run Review ──────────────────────────────────────────────────
+    document.getElementById('run-btn').addEventListener('click', async () => {
+      const diffText = document.getElementById('diff-input').value.trim();
+      const errEl = document.getElementById('review-error');
+      const statusEl = document.getElementById('status-msg');
+      const btn = document.getElementById('run-btn');
+
+      errEl.classList.add('hidden');
+      if (!diffText) {
+        errEl.textContent = 'Please paste a git diff or load a sample before running.';
+        errEl.classList.remove('hidden');
+        return;
+      }
+
+      const payload = { diff_text: diffText, ...getCredOverrides() };
+
+      btn.disabled = true;
+      document.getElementById('btn-icon').outerHTML =
+        `<svg id="btn-icon" class="w-4 h-4 spinner" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+           <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+         </svg>`;
+      statusEl.textContent = 'Running 3 agents in parallel…';
+
+      try {
+        const r = await fetch('/api/review', {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body:JSON.stringify(payload),
+        });
+        if (!r.ok) {
+          const b = await r.json().catch(()=>({}));
+          throw new Error(b.detail || `HTTP ${r.status}`);
+        }
+        currentReport = await r.json();
+        renderReport(currentReport);
+        statusEl.textContent = 'Review complete';
+      } catch(e) {
+        errEl.textContent = `Review failed: ${e.message}`;
+        errEl.classList.remove('hidden');
+        statusEl.textContent = '';
+      } finally {
+        btn.disabled = false;
+        document.getElementById('btn-icon').outerHTML =
+          `<svg id="btn-icon" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+             <path stroke-linecap="round" stroke-linejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/>
+             <path stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+           </svg>`;
+      }
+    });
+
+    // ── Filter tabs ─────────────────────────────────────────────────
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active','bg-blue-600','text-white'));
+        btn.classList.add('active');
+        activeFilter = btn.dataset.filter;
+        if (currentReport) renderFindings(currentReport);
+      });
+    });
+
+    // ── Render helpers ───────────────────────────────────────────────
+    function renderReport(report) {
+      const section = document.getElementById('results-section');
+      section.classList.remove('hidden');
+
+      const score = report.health_score;
+      document.getElementById('health-score').textContent = score;
+      document.getElementById('total-issues').textContent = report.total_issues;
+      const bar = document.getElementById('score-bar');
+      bar.style.width = score + '%';
+      bar.className = 'h-full rounded-full transition-all duration-500 ' +
+        (score >= 80 ? 'bg-green-500' : score >= 50 ? 'bg-amber-500' : 'bg-red-500');
+
+      renderRobotDeck(report);
+      renderFindings(report);
+      section.scrollIntoView({ behavior:'smooth', block:'start' });
+    }
+
+    function renderRobotDeck(report) {
+      // Store findings per bot
+      botState.sec.findings  = report.security     || [];
+      botState.perf.findings = report.performance  || [];
+      botState.arch.findings = report.architecture || [];
+
+      renderBotFindings('secbot',  botState.sec.findings,  'red');
+      renderBotFindings('perfbot', botState.perf.findings, 'amber');
+      renderBotFindings('archbot', botState.arch.findings, 'purple');
+
+      // Reset chat histories when new review runs
+      botState.sec.history = [];
+      botState.perf.history = [];
+      botState.arch.history = [];
+      ['sec','perf','arch'].forEach(id => {
+        const thread = document.getElementById(id+'-thread');
+        if (thread) { thread.innerHTML=''; thread.classList.add('hidden'); }
+      });
+    }
+
+    function renderBotFindings(botId, findings, color) {
+      const container = document.getElementById(botId+'-findings');
+      const statusEl  = document.getElementById(botId+'-status');
+      container.innerHTML = '';
+
+      if (findings.length === 0) {
+        statusEl.textContent = '✓ All Clear';
+        statusEl.className = 'text-xs font-semibold px-2.5 py-0.5 rounded-full bg-green-900/60 text-green-300';
+        container.innerHTML = '<p class="text-center text-xs text-slate-600 py-3">No findings.</p>';
+        return;
+      }
+
+      statusEl.textContent = `⚠ ${findings.length} Issue${findings.length>1?'s':''} Found`;
+      statusEl.className = `text-xs font-semibold px-2.5 py-0.5 rounded-full bg-${color}-900/80 text-${color}-300`;
+
+      findings.forEach(f => {
+        const sevClass = f.severity==='CRITICAL'?'bg-red-900 text-red-300':f.severity==='WARNING'?'bg-amber-900 text-amber-300':'bg-blue-900 text-blue-300';
+        const card = document.createElement('div');
+        card.className = 'rounded-lg bg-black/30 border border-white/5 px-3 py-2 space-y-0.5';
+        card.innerHTML = `
+          <div class="flex items-center gap-1.5 flex-wrap">
+            <span class="text-[9px] font-bold px-1.5 py-0.5 rounded-full ${sevClass}">${f.severity}</span>
+            <span class="font-mono text-[9px] text-slate-500 truncate">${escapeHtml(f.file)}:${f.line_number}</span>
+          </div>
+          <p class="text-xs text-slate-200 leading-snug">${escapeHtml(f.issue)}</p>`;
+        container.appendChild(card);
+      });
+    }
+
+    function renderFindings(report) {
+      const container = document.getElementById('findings-container');
+      const noMsg     = document.getElementById('no-findings');
+      container.innerHTML = '';
+      const map = { security:report.security||[], performance:report.performance||[], architecture:report.architecture||[] };
+      const findings = activeFilter==='all' ? [...map.security,...map.performance,...map.architecture] : (map[activeFilter]||[]);
+      if (!findings.length) { noMsg.classList.remove('hidden'); return; }
+      noMsg.classList.add('hidden');
+      const tpl = document.getElementById('finding-tpl');
+      findings.forEach(f => {
+        const node = tpl.content.cloneNode(true);
+        const sev = node.querySelector('.severity-badge');
+        sev.textContent = f.severity;
+        sev.className += ' ' + severityClass(f.severity);
+        node.querySelector('.category-badge').textContent = f.category;
+        node.querySelector('.file-label').textContent = f.file;
+        node.querySelector('.line-num').textContent = f.line_number;
+        node.querySelector('.issue-text').textContent = f.issue;
+        node.querySelector('.suggestion-text').textContent = f.suggestion;
+        node.querySelector('.patch-block').innerHTML = colourDiff(escapeHtml(f.patch));
+        container.appendChild(node);
+      });
+    }
+
+    // ── Chat helpers ────────────────────────────────────────────────
+    function toggleChat(id) {
+      const panel = document.getElementById(id+'-chat-panel');
+      const arrow = document.getElementById(id+'-chat-arrow');
+      const isHidden = panel.classList.contains('hidden');
+      panel.classList.toggle('hidden', !isHidden);
+      arrow.textContent = isHidden ? '▾' : '▸';
+    }
+
+    function sendQuickChip(id, text) {
+      const input = document.getElementById(id+'-input');
+      input.value = text;
+      sendChat(id);
+    }
+
+    async function sendChat(id) {
+      const input  = document.getElementById(id+'-input');
+      const thread = document.getElementById(id+'-thread');
+      const msg    = input.value.trim();
+      if (!msg) return;
+
+      const state = botState[id];
+      input.value = '';
+      thread.classList.remove('hidden');
+
+      appendBubble(thread, 'user', null, msg);
+      state.history.push({ role:'user', content:msg });
+
+      // Typing indicator
+      const typingId = 'typing-' + id;
+      const typingEl = document.createElement('div');
+      typingEl.id = typingId;
+      typingEl.className = getBubbleCls(id) + ' flex items-center gap-1.5';
+      typingEl.innerHTML = `<span class="text-xs font-bold mr-1">${botLabel(id)}:</span><span class="bounce-dot">●</span><span class="bounce-dot">●</span><span class="bounce-dot">●</span>`;
+      thread.appendChild(typingEl);
+      thread.scrollTop = thread.scrollHeight;
+
+      try {
+        const payload = {
+          persona: state.persona,
+          message: msg,
+          diff_text: document.getElementById('diff-input').value,
+          findings: state.findings,
+          history: state.history.slice(0,-1),   // history before this message
+          ...getCredOverrides(),
+        };
+        const r = await fetch('/api/chat/agent', {
+          method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)
+        });
+        const data = await r.json();
+        const reply = r.ok ? data.reply : ('⚠️ ' + (data.detail || 'Error'));
+        state.history.push({ role:'assistant', content:reply });
+        typingEl.remove();
+        appendBubble(thread, 'assistant', id, reply);
+      } catch(e) {
+        typingEl.remove();
+        appendBubble(thread, 'assistant', id, '⚠️ Network error. Is the backend running?');
+      }
+    }
+
+    function appendBubble(thread, role, botId, text) {
+      const el = document.createElement('div');
+      el.className = role==='user'
+        ? 'text-xs rounded-lg px-3 py-2 ml-4 bg-white/10 text-slate-200 whitespace-pre-wrap'
+        : getBubbleCls(botId) + ' whitespace-pre-wrap';
+      el.innerHTML = role==='assistant'
+        ? `<span class="font-bold mr-1">${botLabel(botId)}:</span>${escapeHtml(text)}`
+        : escapeHtml(text);
+      thread.appendChild(el);
+      thread.scrollTop = thread.scrollHeight;
+    }
+
+    function getBubbleCls(id) {
+      return {
+        sec:  'text-xs rounded-lg px-3 py-2 mr-4 bg-red-900/30 text-red-100',
+        perf: 'text-xs rounded-lg px-3 py-2 mr-4 bg-amber-900/30 text-amber-100',
+        arch: 'text-xs rounded-lg px-3 py-2 mr-4 bg-purple-900/30 text-purple-100',
+      }[id] || 'text-xs rounded-lg px-3 py-2 mr-4 bg-slate-800 text-slate-200';
+    }
+
+    function botLabel(id) {
+      return { sec:'SecBot 🔒', perf:'PerfBot ⚡', arch:'ArchBot 🏛️' }[id] || id;
+    }
+
+    // ── Council Console ──────────────────────────────────────────────
+    let councilHistory = [];
+
+    function clearCouncil() {
+      councilHistory = [];
+      const thread = document.getElementById('council-thread');
+      thread.innerHTML = `<div id="council-placeholder" class="flex flex-col items-center justify-center py-8 gap-2 text-center">
+        <p class="text-2xl">🤖🤖🤖</p>
+        <p class="text-sm text-slate-400">All three robots are standing by. Ask them anything about the diff.</p>
+      </div>`;
+    }
+
+    async function sendCouncil() {
+      const input = document.getElementById('council-input');
+      const btn   = document.getElementById('council-btn');
+      const thread = document.getElementById('council-thread');
+      const msg = input.value.trim();
+      if (!msg) return;
+
+      // Hide placeholder
+      const ph = document.getElementById('council-placeholder');
+      if (ph) ph.remove();
+
+      input.value = '';
+      btn.disabled = true;
+      btn.innerHTML = `<span class="inline-block w-3 h-3 spinner rounded-full border-2 border-white border-t-transparent"></span>`;
+
+      // User bubble
+      const userEl = document.createElement('div');
+      userEl.className = 'flex justify-end';
+      userEl.innerHTML = `<div class="max-w-[80%] bg-blue-900/40 border border-blue-800/50 rounded-xl px-4 py-2.5 text-sm text-slate-100">${escapeHtml(msg)}</div>`;
+      thread.appendChild(userEl);
+      councilHistory.push({ role:'user', content:msg, persona:null });
+
+      // Typing cards
+      const typingRow = document.createElement('div');
+      typingRow.className = 'grid grid-cols-1 sm:grid-cols-3 gap-3';
+      typingRow.id = 'council-typing';
+      typingRow.innerHTML = [
+        ['🔒 SecBot','text-red-400','bg-red-950/50 border border-red-800/50'],
+        ['⚡ PerfBot','text-amber-400','bg-amber-950/50 border border-amber-800/50'],
+        ['🏛️ ArchBot','text-purple-400','bg-purple-950/50 border border-purple-800/50'],
+      ].map(([label,color,bg])=>`
+        <div class="rounded-xl p-4 ${bg} flex items-center gap-2">
+          <span class="${color} text-xs font-bold">${label}</span>
+          <span class="ml-auto flex gap-1">
+            <span class="${color} bounce-dot text-[8px]">●</span>
+            <span class="${color} bounce-dot text-[8px]">●</span>
+            <span class="${color} bounce-dot text-[8px]">●</span>
+          </span>
+        </div>`).join('');
+      thread.appendChild(typingRow);
+      thread.scrollTop = thread.scrollHeight;
+
+      try {
+        const allFindings = currentReport
+          ? [...(currentReport.security||[]),...(currentReport.performance||[]),...(currentReport.architecture||[])]
+          : [];
+        const payload = {
+          message: msg,
+          diff_text: document.getElementById('diff-input').value,
+          findings: allFindings,
+          history: councilHistory.slice(0,-1),
+          ...getCredOverrides(),
+        };
+        const r = await fetch('/api/chat/council', {
+          method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)
+        });
+        const data = await r.json();
+        typingRow.remove();
+
+        const replyRow = document.createElement('div');
+        replyRow.className = 'grid grid-cols-1 sm:grid-cols-3 gap-3';
+
+        const DISPLAY = {
+          SECURITY:     { label:'🔒 SecBot',  color:'text-red-400',    bg:'bg-red-950/50 border border-red-800/50'       },
+          PERFORMANCE:  { label:'⚡ PerfBot',  color:'text-amber-400',  bg:'bg-amber-950/50 border border-amber-800/50'   },
+          ARCHITECTURE: { label:'🏛️ ArchBot', color:'text-purple-400', bg:'bg-purple-950/50 border border-purple-800/50' },
+        };
+
+        const replies = r.ok ? data.replies : [{ persona:'SECURITY', reply: '⚠️ ' + (data.detail||'Error') }];
+        replies.forEach(rep => {
+          const d = DISPLAY[rep.persona] || { label:'🤖 Bot', color:'text-slate-400', bg:'bg-slate-900' };
+          const card = document.createElement('div');
+          card.className = `rounded-xl p-4 space-y-1.5 ${d.bg}`;
+          card.innerHTML = `
+            <div class="flex items-center gap-1.5 text-xs font-bold ${d.color}">${d.label}</div>
+            <p class="text-sm text-slate-200 leading-relaxed whitespace-pre-wrap">${escapeHtml(rep.reply)}</p>`;
+          replyRow.appendChild(card);
+        });
+        thread.appendChild(replyRow);
+      } catch(e) {
+        typingRow.remove();
+        const errEl = document.createElement('div');
+        errEl.className = 'text-xs text-red-400 px-2';
+        errEl.textContent = '⚠️ Network error: ' + e.message;
+        thread.appendChild(errEl);
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = 'Ask →';
+        thread.scrollTop = thread.scrollHeight;
+      }
+    }
+
+    // ── Util ─────────────────────────────────────────────────────────
+    function severityClass(s) {
+      return s==='CRITICAL'?'bg-red-900 text-red-300':s==='WARNING'?'bg-amber-900 text-amber-300':'bg-blue-900 text-blue-300';
+    }
+    function escapeHtml(str) {
+      return String(str||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    }
+    function colourDiff(escaped) {
+      return escaped.split('\n').map(line => {
+        if (line.startsWith('+'))  return `<span class="diff-add">${line}</span>`;
+        if (line.startsWith('-'))  return `<span class="diff-del">${line}</span>`;
+        if (/^(@@|diff|index|---|[+]{3})/.test(line)) return `<span class="diff-meta">${line}</span>`;
+        return line;
+      }).join('\n');
+    }
+
+    // ── Boot ─────────────────────────────────────────────────────────
+    checkHealth();
+    loadSamples();
+  </script>
+</body>
+</html>

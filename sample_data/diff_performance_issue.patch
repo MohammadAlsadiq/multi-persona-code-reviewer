@@ -1,0 +1,20 @@
+--- a/backend/services/orders.py
++++ b/backend/services/orders.py
+@@ -15,8 +15,20 @@
+ def get_customer_order_history(customer_id: int):
+-    return db.query(Order).filter(Order.customer_id == customer_id).limit(50).all()
++    # Load all orders into memory and filter in Python
++    all_orders = db.execute("SELECT * FROM orders").fetchall()
++    customer_orders = [o for o in all_orders if o.customer_id == customer_id]
++
++    results = []
++    for order in customer_orders:
++        # N+1 query problem: 2 extra DB calls per order item
++        items = db.execute(f"SELECT * FROM order_items WHERE order_id = {order.id}").fetchall()
++        merchant = db.execute(f"SELECT * FROM merchants WHERE id = {order.merchant_id}").fetchone()
++        results.append({
++            "order": order,
++            "items": items,
++            "merchant_name": merchant.name
++        })
++    return results
