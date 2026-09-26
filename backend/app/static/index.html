@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Multi-Persona Code Reviewer</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    /* scrollbar */
+    textarea::-webkit-scrollbar { width: 6px; }
+    textarea::-webkit-scrollbar-thumb { background: #475569; border-radius: 3px; }
+    pre::-webkit-scrollbar { height: 6px; }
+    pre::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+
+    /* diff syntax highlighting in patch blocks */
+    .diff-add  { color: #4ade80; }
+    .diff-del  { color: #f87171; }
+    .diff-meta { color: #94a3b8; }
+
+    /* spinner */
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .spinner { animation: spin 0.8s linear infinite; }
+
+    /* tab active state */
+    .tab-btn.active {
+      background-color: #3b82f6;
+      color: #fff;
+    }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen font-sans antialiased">
+
+  <!-- ── Header ─────────────────────────────────────────────────── -->
+  <header class="border-b border-slate-800 bg-slate-900 px-6 py-4 flex items-center gap-3">
+    <svg class="w-7 h-7 text-blue-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
+      <path stroke-linecap="round" stroke-linejoin="round"
+            d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944
+               a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0
+               5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03
+               9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+    </svg>
+    <div>
+      <h1 class="text-lg font-semibold leading-tight">Multi-Persona Code Reviewer</h1>
+      <p class="text-xs text-slate-400">Security · Performance · Architecture — running in parallel</p>
+    </div>
+    <span id="health-badge"
+          class="ml-auto text-xs px-2 py-0.5 rounded-full bg-slate-700 text-slate-400">
+      checking…
+    </span>
+  </header>
+
+  <main class="max-w-5xl mx-auto px-4 py-8 space-y-6">
+
+    <!-- ── Sample Loaders ──────────────────────────────────────── -->
+    <section class="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-3">
+      <h2 class="text-sm font-semibold text-slate-300 uppercase tracking-wider">Load Sample Diff</h2>
+      <div class="flex flex-wrap gap-2" id="sample-buttons">
+        <button data-sample="diff_security_flaw.patch"
+                class="sample-btn px-4 py-2 text-sm rounded-lg bg-red-950 hover:bg-red-900 border border-red-800 text-red-300 transition-colors">
+          🔒 Security Flaw
+        </button>
+        <button data-sample="diff_performance_issue.patch"
+                class="sample-btn px-4 py-2 text-sm rounded-lg bg-amber-950 hover:bg-amber-900 border border-amber-800 text-amber-300 transition-colors">
+          ⚡ Performance Issue
+        </button>
+        <button data-sample="diff_architecture_violation.patch"
+                class="sample-btn px-4 py-2 text-sm rounded-lg bg-violet-950 hover:bg-violet-900 border border-violet-800 text-violet-300 transition-colors">
+          🏛 Architecture Violation
+        </button>
+      </div>
+      <p id="sample-error" class="hidden text-xs text-red-400"></p>
+    </section>
+
+    <!-- ── Diff Input ──────────────────────────────────────────── -->
+    <section class="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-3">
+      <h2 class="text-sm font-semibold text-slate-300 uppercase tracking-wider">Git Diff Input</h2>
+      <textarea id="diff-input"
+                rows="14"
+                placeholder="Paste your raw git diff / unified diff here…"
+                class="w-full rounded-lg bg-slate-950 border border-slate-700 text-slate-100
+                       font-mono text-xs leading-relaxed p-3 resize-y
+                       focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent
+                       placeholder-slate-600"></textarea>
+
+      <!-- Collapsible overrides -->
+      <details class="group">
+        <summary class="cursor-pointer select-none text-xs text-slate-400 hover:text-slate-200 transition-colors w-fit">
+          ▸ Override LLM credentials (optional)
+        </summary>
+        <div class="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div>
+            <label class="block text-xs text-slate-400 mb-1">API Key</label>
+            <input id="override-api-key" type="password" placeholder="sk-…"
+                   class="w-full rounded bg-slate-950 border border-slate-700 text-slate-100
+                          text-xs px-3 py-2 focus:outline-none focus:ring-1 focus:ring-blue-600" />
+          </div>
+          <div>
+            <label class="block text-xs text-slate-400 mb-1">Base URL</label>
+            <input id="override-base-url" type="text" placeholder="https://api.openai.com/v1"
+                   class="w-full rounded bg-slate-950 border border-slate-700 text-slate-100
+                          text-xs px-3 py-2 focus:outline-none focus:ring-1 focus:ring-blue-600" />
+          </div>
+          <div>
+            <label class="block text-xs text-slate-400 mb-1">Model</label>
+            <input id="override-model" type="text" placeholder="gpt-4o"
+                   class="w-full rounded bg-slate-950 border border-slate-700 text-slate-100
+                          text-xs px-3 py-2 focus:outline-none focus:ring-1 focus:ring-blue-600" />
+          </div>
+        </div>
+      </details>
+
+      <div class="flex items-center gap-3 pt-1">
+        <button id="run-btn"
+                class="px-6 py-2.5 rounded-lg bg-blue-600 hover:bg-blue-500 active:bg-blue-700
+                       text-sm font-semibold transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
+          <svg id="btn-icon" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/>
+            <path stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+          </svg>
+          Run Review
+        </button>
+        <span id="status-msg" class="text-xs text-slate-400"></span>
+      </div>
+      <p id="review-error" class="hidden text-xs text-red-400"></p>
+    </section>
+
+    <!-- ── Results Dashboard ───────────────────────────────────── -->
+    <section id="results-section" class="hidden space-y-5">
+
+      <!-- Score bar -->
+      <div class="bg-slate-900 border border-slate-800 rounded-xl p-5 flex flex-col sm:flex-row sm:items-center gap-4">
+        <div class="flex-1">
+          <p class="text-xs text-slate-400 mb-1">Health Score</p>
+          <div class="flex items-end gap-3">
+            <span id="health-score" class="text-5xl font-bold tabular-nums">—</span>
+            <span class="text-slate-500 text-sm mb-1">/&nbsp;100</span>
+          </div>
+          <div class="mt-2 h-2 rounded-full bg-slate-800 overflow-hidden">
+            <div id="score-bar" class="h-full rounded-full transition-all duration-500 bg-green-500" style="width:0%"></div>
+          </div>
+        </div>
+        <div class="text-right sm:text-left">
+          <p class="text-xs text-slate-400 mb-1">Total Issues</p>
+          <p id="total-issues" class="text-4xl font-bold tabular-nums text-slate-100">—</p>
+        </div>
+      </div>
+
+      <!-- Filter tabs -->
+      <div class="flex flex-wrap gap-2" id="filter-tabs">
+        <button class="tab-btn active px-4 py-1.5 text-sm rounded-full border border-slate-700 transition-colors" data-filter="all">All</button>
+        <button class="tab-btn px-4 py-1.5 text-sm rounded-full border border-red-900 text-red-300 hover:bg-red-950 transition-colors" data-filter="security">🔒 Security</button>
+        <button class="tab-btn px-4 py-1.5 text-sm rounded-full border border-amber-900 text-amber-300 hover:bg-amber-950 transition-colors" data-filter="performance">⚡ Performance</button>
+        <button class="tab-btn px-4 py-1.5 text-sm rounded-full border border-violet-900 text-violet-300 hover:bg-violet-950 transition-colors" data-filter="architecture">🏛 Architecture</button>
+      </div>
+
+      <!-- Finding cards -->
+      <div id="findings-container" class="space-y-4"></div>
+
+      <p id="no-findings" class="hidden text-center text-slate-500 text-sm py-8">
+        No findings match this filter.
+      </p>
+    </section>
+
+  </main>
+
+  <!-- ── Templates (hidden) ─────────────────────────────────────── -->
+  <template id="finding-tpl">
+    <article class="finding-card bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
+      <div class="px-5 py-4 flex flex-wrap items-start gap-3">
+        <span class="severity-badge text-xs font-bold px-2.5 py-0.5 rounded-full"></span>
+        <span class="category-badge text-xs px-2 py-0.5 rounded-full bg-slate-800 text-slate-300"></span>
+        <span class="file-label font-mono text-xs text-slate-400 break-all"></span>
+        <span class="line-label text-xs text-slate-500 ml-auto">line <strong class="line-num text-slate-300"></strong></span>
+      </div>
+      <div class="px-5 pb-2">
+        <p class="issue-text font-medium text-slate-100 text-sm leading-snug"></p>
+      </div>
+      <div class="px-5 pb-4">
+        <p class="text-xs text-slate-400 uppercase tracking-wide mb-1">Suggestion</p>
+        <p class="suggestion-text text-sm text-slate-300 leading-relaxed"></p>
+      </div>
+      <details class="border-t border-slate-800">
+        <summary class="px-5 py-3 cursor-pointer select-none text-xs text-slate-500 hover:text-slate-300 transition-colors">
+          Show suggested patch
+        </summary>
+        <pre class="patch-block overflow-x-auto text-xs font-mono leading-relaxed bg-slate-950 px-5 py-4 m-0"></pre>
+      </details>
+    </article>
+  </template>
+
+  <script>
+    // ── Globals ────────────────────────────────────────────────────
+    let samplesCache = null;
+    let currentReport = null;
+    let activeFilter = 'all';
+
+    // ── Health check ───────────────────────────────────────────────
+    async function checkHealth() {
+      const badge = document.getElementById('health-badge');
+      try {
+        const r = await fetch('/api/health');
+        if (r.ok) {
+          badge.textContent = '● online';
+          badge.className = 'ml-auto text-xs px-2 py-0.5 rounded-full bg-green-900 text-green-400';
+        } else throw new Error();
+      } catch {
+        badge.textContent = '● offline';
+        badge.className = 'ml-auto text-xs px-2 py-0.5 rounded-full bg-red-900 text-red-400';
+      }
+    }
+
+    // ── Load samples once, then cache ─────────────────────────────
+    async function loadSamples() {
+      if (samplesCache) return samplesCache;
+      const errEl = document.getElementById('sample-error');
+      try {
+        const r = await fetch('/api/samples');
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        samplesCache = await r.json();
+        errEl.classList.add('hidden');
+        return samplesCache;
+      } catch (e) {
+        errEl.textContent = `Could not load samples: ${e.message}`;
+        errEl.classList.remove('hidden');
+        return null;
+      }
+    }
+
+    // ── Sample buttons ─────────────────────────────────────────────
+    document.querySelectorAll('.sample-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const key = btn.dataset.sample;
+        const data = await loadSamples();
+        if (data && data[key]) {
+          document.getElementById('diff-input').value = data[key];
+          // visual feedback
+          btn.classList.add('ring-2', 'ring-offset-1', 'ring-offset-slate-900', 'ring-blue-500');
+          setTimeout(() => btn.classList.remove('ring-2', 'ring-offset-1', 'ring-offset-slate-900', 'ring-blue-500'), 900);
+        }
+      });
+    });
+
+    // ── Run Review ─────────────────────────────────────────────────
+    document.getElementById('run-btn').addEventListener('click', async () => {
+      const diffText = document.getElementById('diff-input').value.trim();
+      const errEl = document.getElementById('review-error');
+      const statusEl = document.getElementById('status-msg');
+      const btn = document.getElementById('run-btn');
+      const icon = document.getElementById('btn-icon');
+
+      errEl.classList.add('hidden');
+
+      if (!diffText) {
+        errEl.textContent = 'Please paste a git diff or load a sample before running.';
+        errEl.classList.remove('hidden');
+        return;
+      }
+
+      // Build payload
+      const payload = { diff_text: diffText };
+      const apiKey  = document.getElementById('override-api-key').value.trim();
+      const baseUrl = document.getElementById('override-base-url').value.trim();
+      const model   = document.getElementById('override-model').value.trim();
+      if (apiKey)  payload.api_key  = apiKey;
+      if (baseUrl) payload.base_url = baseUrl;
+      if (model)   payload.model    = model;
+
+      // Spinner
+      btn.disabled = true;
+      icon.outerHTML = `<svg id="btn-icon" class="w-4 h-4 spinner" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+      </svg>`;
+      statusEl.textContent = 'Running 3 agents in parallel…';
+
+      try {
+        const r = await fetch('/api/review', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        if (!r.ok) {
+          const body = await r.json().catch(() => ({}));
+          throw new Error(body.detail || `HTTP ${r.status}`);
+        }
+        currentReport = await r.json();
+        renderReport(currentReport);
+        statusEl.textContent = 'Review complete';
+      } catch (e) {
+        errEl.textContent = `Review failed: ${e.message}`;
+        errEl.classList.remove('hidden');
+        statusEl.textContent = '';
+      } finally {
+        btn.disabled = false;
+        // Restore play icon
+        document.getElementById('btn-icon').outerHTML = `<svg id="btn-icon" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/>
+          <path stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+        </svg>`;
+      }
+    });
+
+    // ── Filter tabs ────────────────────────────────────────────────
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active', 'bg-blue-600', 'text-white'));
+        btn.classList.add('active');
+        activeFilter = btn.dataset.filter;
+        if (currentReport) renderFindings(currentReport);
+      });
+    });
+
+    // ── Render helpers ─────────────────────────────────────────────
+    function renderReport(report) {
+      const section = document.getElementById('results-section');
+      section.classList.remove('hidden');
+
+      // Score
+      const score = report.health_score;
+      document.getElementById('health-score').textContent = score;
+      document.getElementById('total-issues').textContent = report.total_issues;
+      const bar = document.getElementById('score-bar');
+      bar.style.width = score + '%';
+      bar.className = 'h-full rounded-full transition-all duration-500 ' +
+        (score >= 80 ? 'bg-green-500' : score >= 50 ? 'bg-amber-500' : 'bg-red-500');
+
+      renderFindings(report);
+
+      section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
+    function renderFindings(report) {
+      const container = document.getElementById('findings-container');
+      const noMsg = document.getElementById('no-findings');
+      container.innerHTML = '';
+
+      const map = {
+        security:     report.security     || [],
+        performance:  report.performance  || [],
+        architecture: report.architecture || [],
+      };
+
+      let findings = [];
+      if (activeFilter === 'all') {
+        findings = [...map.security, ...map.performance, ...map.architecture];
+      } else {
+        findings = map[activeFilter] || [];
+      }
+
+      if (findings.length === 0) {
+        noMsg.classList.remove('hidden');
+        return;
+      }
+      noMsg.classList.add('hidden');
+
+      const tpl = document.getElementById('finding-tpl');
+      findings.forEach(f => {
+        const node = tpl.content.cloneNode(true);
+
+        // Severity badge
+        const sev = node.querySelector('.severity-badge');
+        sev.textContent = f.severity;
+        sev.className += ' ' + severityClass(f.severity);
+
+        // Category badge
+        node.querySelector('.category-badge').textContent = f.category;
+
+        node.querySelector('.file-label').textContent = f.file;
+        node.querySelector('.line-num').textContent = f.line_number;
+        node.querySelector('.issue-text').textContent = f.issue;
+        node.querySelector('.suggestion-text').textContent = f.suggestion;
+
+        // Patch block with diff colouring
+        const pre = node.querySelector('.patch-block');
+        pre.innerHTML = colourDiff(escapeHtml(f.patch));
+
+        container.appendChild(node);
+      });
+    }
+
+    function severityClass(s) {
+      return s === 'CRITICAL' ? 'bg-red-900 text-red-300'
+           : s === 'WARNING'  ? 'bg-amber-900 text-amber-300'
+           :                    'bg-blue-900 text-blue-300';
+    }
+
+    function escapeHtml(str) {
+      return str
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+    }
+
+    function colourDiff(escaped) {
+      return escaped.split('\n').map(line => {
+        if (line.startsWith('+'))       return `<span class="diff-add">${line}</span>`;
+        if (line.startsWith('-'))       return `<span class="diff-del">${line}</span>`;
+        if (line.startsWith('@@') || line.startsWith('diff') || line.startsWith('index') || line.startsWith('---') || line.startsWith('+++'))
+                                        return `<span class="diff-meta">${line}</span>`;
+        return line;
+      }).join('\n');
+    }
+
+    // ── Boot ───────────────────────────────────────────────────────
+    checkHealth();
+    // Pre-warm samples cache silently
+    loadSamples();
+  </script>
+</body>
+</html>
