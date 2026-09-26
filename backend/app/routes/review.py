@@ -1,4 +1,5 @@
-"""Review routes — /api/review, /api/samples, /api/health, /api/apply-fix."""
+"""Review routes — /api/review, /api/samples, /api/health, /api/apply-fix,
+                  /api/chat/agent, /api/chat/council."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -7,9 +8,18 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+from app.agents.chat_agent import run_council_chat, run_single_agent_chat
 from app.agents.fix_generator import FixPreview, generate_fix_preview
 from app.agents.orchestrator import run_parallel_review
-from app.core.schemas import DiffInput, Finding, ReviewReport
+from app.core.schemas import (
+    AgentChatRequest,
+    AgentChatResponse,
+    CouncilChatRequest,
+    CouncilChatResponse,
+    DiffInput,
+    Finding,
+    ReviewReport,
+)
 
 router = APIRouter(prefix="/api")
 
@@ -37,7 +47,7 @@ class ApplyFixRequest(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Routes
+# Existing routes
 # ---------------------------------------------------------------------------
 
 
@@ -89,12 +99,50 @@ async def apply_fix(body: ApplyFixRequest) -> FixPreview:
     """
     Accept a :class:`Finding` (and optional original *diff_text*), run it
     through :func:`~app.agents.fix_generator.generate_fix_preview`, and return
-    a structured preview containing:
-
-    - **original_code** — the lines *before* the fix.
-    - **patched_code** — the lines *after* the fix.
-    - **unified_patch** — the normalised unified-diff patch, ready to copy or apply.
-    - **status** — one of ``ok``, ``patch_unavailable``, or ``parse_error``.
+    a structured preview containing ``original_code``, ``patched_code``,
+    ``unified_patch``, and ``status``.
     """
-    preview = generate_fix_preview(body.finding, body.diff_text or "")
-    return preview
+    return generate_fix_preview(body.finding, body.diff_text or "")
+
+
+# ---------------------------------------------------------------------------
+# Chat endpoints
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/chat/agent",
+    response_model=AgentChatResponse,
+    summary="1-on-1 follow-up chat with a single robot persona",
+)
+async def chat_agent(req: AgentChatRequest) -> AgentChatResponse:
+    """
+    Send a follow-up question to **one** robot persona (SecBot, PerfBot, or
+    ArchBot).  Pass the diff, the persona's findings, and the conversation
+    history so the robot can give contextually grounded answers.
+
+    Credential overrides (``api_key``, ``base_url``, ``model``) work the same
+    way as in ``/api/review``.
+    """
+    if not req.message.strip():
+        raise HTTPException(status_code=422, detail="message must not be empty.")
+    return await run_single_agent_chat(req)
+
+
+@router.post(
+    "/chat/council",
+    response_model=CouncilChatResponse,
+    summary="Ask all 3 robot personas the same question simultaneously",
+)
+async def chat_council(req: CouncilChatRequest) -> CouncilChatResponse:
+    """
+    Send one question to the **Review Council** (all three robot personas at
+    once).  All three reply concurrently via ``asyncio.gather``.  Each robot
+    answers from its own domain perspective and only references its own
+    findings.
+
+    Credential overrides work the same way as in ``/api/review``.
+    """
+    if not req.message.strip():
+        raise HTTPException(status_code=422, detail="message must not be empty.")
+    return await run_council_chat(req)

@@ -114,19 +114,19 @@ export default function FixSuggestionModal({
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
       onClick={(e) => e.target === e.currentTarget && onClose()}
     >
-      <div className="relative w-full max-w-4xl max-h-[90vh] flex flex-col bg-gray-950 rounded-2xl shadow-2xl overflow-hidden border border-gray-800">
+      <div className="relative w-full max-w-4xl max-h-[90vh] flex flex-col bg-[#0d1117] rounded-2xl shadow-2xl overflow-hidden border border-[#30363d]">
         {/* Modal header */}
-        <div className="flex items-start justify-between px-6 py-4 border-b border-gray-800">
+        <div className="flex items-start justify-between px-6 py-4 border-b border-[#30363d]">
           <div className="space-y-0.5">
-            <h3 className="text-white text-base font-semibold">Fix Preview</h3>
-            <p className="text-xs text-gray-400 font-mono">
+            <h3 className="text-[#e6edf3] text-base font-semibold">Fix Preview</h3>
+            <p className="text-xs text-[#768390] font-mono">
               {finding.file}:{finding.line_number}
             </p>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="text-gray-400 hover:text-white transition text-xl leading-none mt-0.5"
+            className="text-[#768390] hover:text-[#e6edf3] transition text-xl leading-none mt-0.5"
             aria-label="Close"
           >
             ×
@@ -137,14 +137,14 @@ export default function FixSuggestionModal({
         <div className="overflow-y-auto flex-1 p-6 space-y-6">
           {/* Issue + suggestion */}
           <div className="space-y-1">
-            <p className="text-sm font-semibold text-white">{finding.issue}</p>
-            <p className="text-sm text-gray-400">{finding.suggestion}</p>
+            <p className="text-sm font-semibold text-[#e6edf3]">{finding.issue}</p>
+            <p className="text-sm text-[#adbac7]">{finding.suggestion}</p>
           </div>
 
           {/* Loading */}
           {loading && (
-            <div className="flex items-center gap-3 text-gray-400 text-sm">
-              <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-gray-400 border-t-transparent" />
+            <div className="flex items-center gap-3 text-[#768390] text-sm">
+              <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-[#768390] border-t-transparent" />
               Generating preview…
             </div>
           )}
@@ -169,23 +169,23 @@ export default function FixSuggestionModal({
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-1">
                   <div className="flex items-center justify-between">
-                    <span className="text-xs text-gray-500 uppercase tracking-wide font-medium">
+                    <span className="text-xs text-[#768390] uppercase tracking-wide font-medium">
                       Before
                     </span>
                     <CopyButton text={preview.original_code} />
                   </div>
-                  <pre className="diff-block text-xs overflow-x-auto text-red-300">
+                  <pre className="diff-block text-xs overflow-x-auto text-[#f85149]">
                     {preview.original_code || "(empty)"}
                   </pre>
                 </div>
                 <div className="space-y-1">
                   <div className="flex items-center justify-between">
-                    <span className="text-xs text-gray-500 uppercase tracking-wide font-medium">
+                    <span className="text-xs text-[#768390] uppercase tracking-wide font-medium">
                       After
                     </span>
                     <CopyButton text={preview.patched_code} />
                   </div>
-                  <pre className="diff-block text-xs overflow-x-auto text-green-300">
+                  <pre className="diff-block text-xs overflow-x-auto text-[#3fb950]">
                     {preview.patched_code || "(empty)"}
                   </pre>
                 </div>

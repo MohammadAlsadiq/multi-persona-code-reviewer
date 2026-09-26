@@ -1,5 +1,6 @@
 /**
  * DiffInput — textarea + sample loader for pasting a unified diff.
+ * Uses CSS-variable-backed semantic classes for dark/light theme support.
  */
 import React, { useState } from "react";
 
@@ -10,7 +11,6 @@ interface DiffInputProps {
   onChange: (value: string) => void;
   onSubmit: () => void;
   loading: boolean;
-  /** Optional per-request credential overrides */
   apiKey: string;
   baseUrl: string;
   model: string;
@@ -50,30 +50,26 @@ export default function DiffInput({
     }
   }
 
-  function loadSample(content: string) {
-    onChange(content);
-  }
-
   const sampleNames = samplesMap ? Object.keys(samplesMap) : [];
 
   return (
-    <section className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 space-y-4">
+    <section className="card shadow-sm p-6 space-y-4">
       {/* Header row */}
       <div className="flex items-center justify-between gap-4 flex-wrap">
-        <h2 className="text-base font-semibold text-gray-800">Unified Diff Input</h2>
+        <h2 className="text-base font-semibold text-primary">Unified Diff Input</h2>
         <div className="flex gap-2 flex-wrap">
           <button
             type="button"
             onClick={loadSamples}
             disabled={samplesLoading}
-            className="text-sm px-3 py-1.5 rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50 disabled:opacity-50 transition"
+            className="btn-ghost disabled:opacity-50"
           >
             {samplesLoading ? "Loading…" : "Load samples ↓"}
           </button>
           <button
             type="button"
             onClick={() => setShowCredentials((s) => !s)}
-            className="text-sm px-3 py-1.5 rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50 transition"
+            className="btn-ghost"
           >
             {showCredentials ? "Hide credentials" : "Override credentials"}
           </button>
@@ -87,7 +83,7 @@ export default function DiffInput({
             <button
               key={name}
               type="button"
-              onClick={() => loadSample(samplesMap[name])}
+              onClick={() => onChange(samplesMap[name])}
               className="text-xs px-3 py-1 rounded-full bg-brand text-white hover:bg-brand-dark transition"
             >
               {name.replace(/\.patch$/, "").replace(/_/g, " ")}
@@ -98,37 +94,23 @@ export default function DiffInput({
 
       {/* Credential overrides */}
       {showCredentials && (
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <div>
-            <label className="block text-xs text-gray-500 mb-1">API Key</label>
-            <input
-              type="password"
-              value={apiKey}
-              onChange={(e) => onApiKeyChange(e.target.value)}
-              placeholder="sk-… (leave blank for .env)"
-              className="w-full text-sm border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand/40"
-            />
-          </div>
-          <div>
-            <label className="block text-xs text-gray-500 mb-1">Base URL</label>
-            <input
-              type="text"
-              value={baseUrl}
-              onChange={(e) => onBaseUrlChange(e.target.value)}
-              placeholder="https://api.groq.com/openai/v1"
-              className="w-full text-sm border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand/40"
-            />
-          </div>
-          <div>
-            <label className="block text-xs text-gray-500 mb-1">Model</label>
-            <input
-              type="text"
-              value={model}
-              onChange={(e) => onModelChange(e.target.value)}
-              placeholder="llama-3.3-70b-versatile"
-              className="w-full text-sm border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand/40"
-            />
-          </div>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-4 rounded-lg card-alt">
+          {[
+            { label: "API Key", type: "password", val: apiKey, ph: "sk-… (leave blank for .env)", cb: onApiKeyChange },
+            { label: "Base URL", type: "text",     val: baseUrl, ph: "https://api.groq.com/openai/v1", cb: onBaseUrlChange },
+            { label: "Model",    type: "text",     val: model,   ph: "llama-3.3-70b-versatile", cb: onModelChange },
+          ].map(({ label, type, val, ph, cb }) => (
+            <div key={label}>
+              <label className="block text-xs text-muted mb-1">{label}</label>
+              <input
+                type={type}
+                value={val}
+                onChange={(e) => cb(e.target.value)}
+                placeholder={ph}
+                className="input-base w-full"
+              />
+            </div>
+          ))}
         </div>
       )}
 
@@ -139,7 +121,8 @@ export default function DiffInput({
         rows={14}
         spellCheck={false}
         placeholder={"Paste your unified diff here…\n\ndiff --git a/example.py b/example.py\n--- a/example.py\n+++ b/example.py\n@@ -1,5 +1,5 @@\n ..."}
-        className="w-full font-mono text-xs leading-5 border border-gray-300 rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-brand/40 resize-y bg-gray-50"
+        className="w-full input-base font-mono text-xs leading-5 resize-y p-3"
+        style={{ minHeight: "220px" }}
       />
 
       {/* Submit */}
@@ -148,7 +131,7 @@ export default function DiffInput({
           type="button"
           onClick={onSubmit}
           disabled={loading || !value.trim()}
-          className="px-5 py-2.5 rounded-xl bg-brand text-white font-medium text-sm hover:bg-brand-dark disabled:opacity-50 disabled:cursor-not-allowed transition shadow-sm"
+          className="btn-primary shadow-sm"
         >
           {loading ? (
             <span className="flex items-center gap-2">
