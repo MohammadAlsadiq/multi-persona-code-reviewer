@@ -1,12 +1,15 @@
-"""Review routes — /api/review, /api/samples, /api/health."""
+"""Review routes — /api/review, /api/samples, /api/health, /api/apply-fix."""
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Optional
 
 from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
 
+from app.agents.fix_generator import FixPreview, generate_fix_preview
 from app.agents.orchestrator import run_parallel_review
-from app.core.schemas import DiffInput, ReviewReport
+from app.core.schemas import DiffInput, Finding, ReviewReport
 
 router = APIRouter(prefix="/api")
 
@@ -19,6 +22,23 @@ _SAMPLE_FILES = [
     "diff_performance_issue.patch",
     "diff_architecture_violation.patch",
 ]
+
+
+# ---------------------------------------------------------------------------
+# Request schema for /api/apply-fix
+# ---------------------------------------------------------------------------
+
+
+class ApplyFixRequest(BaseModel):
+    """Payload for the apply-fix endpoint."""
+
+    finding: Finding
+    diff_text: Optional[str] = ""
+
+
+# ---------------------------------------------------------------------------
+# Routes
+# ---------------------------------------------------------------------------
 
 
 @router.get("/health", summary="Health check")
@@ -58,3 +78,23 @@ async def review(diff_input: DiffInput) -> ReviewReport:
         raise HTTPException(status_code=422, detail="diff_text must not be empty.")
 
     return await run_parallel_review(diff_input)
+
+
+@router.post(
+    "/apply-fix",
+    response_model=FixPreview,
+    summary="Generate a before/after preview for a finding's suggested fix",
+)
+async def apply_fix(body: ApplyFixRequest) -> FixPreview:
+    """
+    Accept a :class:`Finding` (and optional original *diff_text*), run it
+    through :func:`~app.agents.fix_generator.generate_fix_preview`, and return
+    a structured preview containing:
+
+    - **original_code** — the lines *before* the fix.
+    - **patched_code** — the lines *after* the fix.
+    - **unified_patch** — the normalised unified-diff patch, ready to copy or apply.
+    - **status** — one of ``ok``, ``patch_unavailable``, or ``parse_error``.
+    """
+    preview = generate_fix_preview(body.finding, body.diff_text or "")
+    return preview

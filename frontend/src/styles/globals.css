@@ -1,0 +1,48 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Smooth scrollbar and base resets */
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  @apply bg-gray-50 text-gray-900 antialiased;
+}
+
+/* Custom scrollbar for textareas */
+textarea {
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 transparent;
+}
+
+textarea::-webkit-scrollbar {
+  width: 6px;
+}
+
+textarea::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+textarea::-webkit-scrollbar-thumb {
+  background-color: #cbd5e1;
+  border-radius: 3px;
+}
+
+/* Code / diff block */
+.diff-block {
+  @apply font-mono text-xs leading-5 whitespace-pre overflow-x-auto rounded bg-gray-900 text-gray-100 p-4;
+}
+
+.diff-line-add {
+  @apply text-green-400;
+}
+
+.diff-line-remove {
+  @apply text-red-400;
+}
+
+.diff-line-meta {
+  @apply text-blue-300;
+}
